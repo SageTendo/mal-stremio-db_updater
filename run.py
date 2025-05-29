@@ -9,8 +9,8 @@ from pymongo import UpdateOne
 app = Flask(__name__)
 
 
-@app.route("/api")
-def hello():
+@app.route("/")
+def index():
     return {
         "status": "ok"
     }
