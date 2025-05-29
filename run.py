@@ -12,7 +12,7 @@ app = Flask(__name__)
 @app.route("/")
 def index():
     return {
-        "status": "ok"
+        "message": "Hello, World!"
     }
 
 
