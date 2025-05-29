@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+python-dotenv = "*"
+pymongo = {extras = ["srv"], version = "*"}
+pipenv = "*"
+waitress = "*"
+httpx = "*"
+flask = {extras = ["async"], version = "*"}
+
+[dev-packages]
+pytest="*"
+pytest-order = "*"
+
+[requires]
+python_version = "3.9"
