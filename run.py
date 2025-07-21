@@ -1,105 +1,109 @@
+import logging
 import os
+from datetime import datetime
 
 from flask import Flask, request
 from httpx import AsyncClient
+from waitress import serve
 
 from db import anime_mapping
 from pymongo import UpdateOne
 
 app = Flask(__name__)
+app.config.from_object("config.Config")
+ANIME_DB_SOURCE = "https://raw.githubusercontent.com/Fribb/anime-lists/refs/heads/master/anime-list-full.json"
+POSSIBLE_KEYS = ["mal_id", "kitsu_id", "thetvdb_id", "anilist_id", "anidb_id", "simkl_id", "livechart_id",
+                 "anisearch_id", "imdb_id", "notify.moe_id", "themoviedb_id", "anime-planet_id", "animecountdown_id"
+                 ]
 
 
 @app.route("/")
 def index():
-    return {
-        "message": "Hello, World!"
-    }
+    logging.info("Hello, World!")
+    return {"message": "Hello, World!"}
 
 
 def get_authorization():
     if not request.headers.get("authorization"):
-        return False, {
-            "status": "error",
-            "message": "No API key provided"
-        }
+        logging.error("No API key provided")
+        return False, {"status": "error", "message": "No API key provided"}
 
     if request.headers.get("authorization") != os.getenv("CRON_SECRET"):
-        return False, {
-            "status": "error",
-            "message": "Unauthorized"
-        }
-    return True
+        logging.error(
+            "Unauthorized request, " + request.headers.get("authorization") + " != " + os.getenv("CRON_SECRET"))
+        return False, {"status": "error", "message": "Unauthorized"}
+    return True, None
+
+
+async def fetch_database():
+    async with AsyncClient() as client:
+        res = await client.get(ANIME_DB_SOURCE)
+        if not res.is_success:
+            logging.error(f"Failed to fetch database: {res.status_code} -> {res.text}")
+            return False, {"status": "error", "code": res.status_code, "message": res.text}
+
+        if len(res.json()) == 0:
+            logging.error("No data returned from mapping db source")
+            return False, {"status": "error", "message": "No data"}
+    return True, res.json()
 
 
 @app.route("/api/rebuild", methods=["GET"])
-async def clear():
+async def rebuild_mongo_database():
     res, error = get_authorization()
     if not res:
         return error
 
-    async with AsyncClient() as client:
-        res = await client.get(
-            "https://raw.githubusercontent.com/Fribb/anime-lists/refs/heads/master/anime-list-full.json")
-
-        if not res.is_success:
-            return {
-                "status": "error",
-                "code": res.status_code,
-                "message": res.text
-            }
-
-        if len(res.json()) == 0:
-            return {
-                "status": "error",
-                "message": "No data"
-            }
+    success, data = await fetch_database()
+    if not success:
+        return data
 
     anime_mapping.delete_many({})
-    anime_mapping.insert_many(res.json())
-    return {
-        "status": "Mapping database rebuilt",
-        "num_total": len(res.json()),
-    }
+
+    last_updated = datetime.now()
+    data_with_last_updated = []
+    for anime in data:
+        # Check if anime has a key
+        key = next((key for key in POSSIBLE_KEYS if key in anime), None)
+        if not key:
+            logging.error(f"Could not find key for {anime}")
+            continue
+        anime["last_updated"] = last_updated
+        data_with_last_updated.append(anime)
+
+    logging.info(f"Rebuilding mapping database with {len(data_with_last_updated)} entries")
+    anime_mapping.insert_many(data_with_last_updated, ordered=False)
+    logging.info(f"Rebuilt mapping database with {len(data_with_last_updated)} entries")
+    return {"status": "Mapping database rebuilt", "num_total": len(data)}
 
 
 @app.route("/api/update", methods=["GET"])
-async def update():
+async def update_mongo_database():
     res, error = get_authorization()
     if not res:
         return error
 
-    async with AsyncClient() as client:
-        res = await client.get(
-            "https://raw.githubusercontent.com/Fribb/anime-lists/refs/heads/master/anime-list-full.json")
-
-        if not res.is_success:
-            return {
-                "status": "error",
-                "code": res.status_code,
-                "message": res.text
-            }
-
-        if len(res.json()) == 0:
-            return {
-                "status": "error",
-                "message": "No data"
-            }
+    success, data = await fetch_database()
+    if not success:
+        return data
 
     bulk_writes = []
-    for anime in res.json():
-        key = next(iter(anime))
-        bulk_writes.append(
-            UpdateOne({key: anime[key]}, {"$setOnInsert": anime}, True)
-        )
+    last_updated = datetime.now()
+    for anime in data:
+        # Check if anime has a key
+        key = next((key for key in POSSIBLE_KEYS if key in anime), None)
+        if not key:
+            logging.error(f"Could not find key for {anime}")
+            continue
 
-    anime_mapping.bulk_write(bulk_writes)
-    return {
-        "status": "Updated mapping database",
-        "num_total": len(res.json()),
-    }
+        anime["last_updated"] = last_updated
+        bulk_writes.append(UpdateOne({key: anime[key]}, {"$setOnInsert": anime}, True))
+
+    logging.info(f"Updating mapping database with {len(bulk_writes)} entries")
+    anime_mapping.bulk_write(bulk_writes, ordered=False)
+    logging.info(f"Updated mapping database with {len(bulk_writes)} entries")
+    return {"status": "Updated mapping database", "num_total": len(bulk_writes)}
 
 
 if __name__ == "__main__":
-    from waitress import serve
-
     serve(app, host="0.0.0.0", port=3000)
