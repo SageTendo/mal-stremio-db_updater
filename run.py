@@ -28,7 +28,8 @@ def get_authorization():
         logging.error("No API key provided")
         return False, {"status": "error", "message": "No API key provided"}
 
-    if request.headers.get("authorization") != os.getenv("CRON_SECRET"):
+    auth_token = request.headers.get("authorization", "Bearer NO_TOKEN").split(" ")[1]
+    if auth_token != os.getenv("CRON_SECRET"):
         logging.error(
             "Unauthorized request, " + request.headers.get("authorization") + " != " + os.getenv("CRON_SECRET"))
         return False, {"status": "error", "message": "Unauthorized"}
