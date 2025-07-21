@@ -67,7 +67,6 @@ async def rebuild_mongo_database():
         # Check if anime has a key
         key = next((key for key in POSSIBLE_KEYS if key in anime), None)
         if not key:
-            logging.error(f"Could not find key for {anime}")
             continue
         anime["last_updated"] = last_updated
         data_with_last_updated.append(anime)
@@ -94,7 +93,6 @@ async def update_mongo_database():
         # Check if anime has a key
         key = next((key for key in POSSIBLE_KEYS if key in anime), None)
         if not key:
-            logging.error(f"Could not find key for {anime}")
             continue
 
         anime["last_updated"] = last_updated
